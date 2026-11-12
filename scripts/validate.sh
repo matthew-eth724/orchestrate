@@ -11,8 +11,11 @@ ok()  { printf 'ok: %s\n' "$*"; }
 
 # 1. SKILL.md exists with valid frontmatter.
 [ -f "$skill/SKILL.md" ] || err "SKILL.md missing"
-name=$(sed -n 's/^name: *//p' "$skill/SKILL.md" | head -1 | tr -d '"')
-desc=$(sed -n 's/^description: *//p' "$skill/SKILL.md" | head -1)
+# Strip quoting and surrounding whitespace; reject empty values, not just
+# absent fields (an empty field passes a plain "does the key exist" check).
+clean() { sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's/^"//' -e 's/"$//'; }
+name=$(sed -n 's/^name://p' "$skill/SKILL.md" | head -1 | clean)
+desc=$(sed -n 's/^description://p' "$skill/SKILL.md" | head -1 | clean)
 
 [ "$name" = "orchestrate" ] || err "name must be 'orchestrate', got '$name'"
 [ -n "$desc" ] || err "description missing"
@@ -93,6 +96,26 @@ AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --list | grep -Fxq "testven
 AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --list | grep -Fxq "testvendor/testvendor/vendored-model" \
   && err "model list still shows a doubled prefix"
 [ "$fail" -eq 0 ] && ok "model list collapses vendored prefixes"
+
+# 10b. Conform to the Agent Skills specification, using the spec skill's own
+#      validator when it is installed. Never hard-require it.
+agent_skills_validator="$HOME/.pi/agent/skills/agent-skills/scripts/validate-skill.sh"
+if [ -x "$agent_skills_validator" ]; then
+  if out=$("$agent_skills_validator" "$skill" 2>&1); then
+    ok "agentskills.io validator: $(printf '%s\n' "$out" | tail -1)"
+  else
+    err "agentskills.io validator failed:
+$out"
+  fi
+else
+  printf 'skip: agentskills.io validator not installed\n'
+fi
+
+# 10c. Every path SKILL.md tells a reader to run must exist in at least one of
+#      the places the skill can be read: a clone, or an install.
+[ -e "$root/scripts/setup.sh" ] || err "SKILL.md tells readers to run scripts/setup.sh, which is missing from the repo"
+[ -e "$root/scripts/install.sh" ] || err "install.sh missing"
+[ "$fail" -eq 0 ] && ok "setup paths referenced by SKILL.md exist"
 
 # 11. No general default anywhere in the shipped skill or scripts.
 if grep -rEq '(worker|architect)[^=]*=\s*"?[a-zA-Z0-9_-]+/[a-zA-Z0-9._/-]+' "$root/scripts/setup.sh" \

@@ -5,7 +5,7 @@ description: "Plan with a strong model, execute through subagents on a cheap mod
 
 # Orchestrate
 
-A stronger **architect** model plans and reviews; cheaper **worker** models write the code. The architect is either the model this session already runs or a model chosen in setup. Neither model has a default: run `scripts/setup.sh` once before the first use.
+A stronger **architect** model plans and reviews; cheaper **worker** models write the code. The architect is either the model this session already runs or a model chosen in setup. Neither model has a default: run `<agent-dir>/bin/orchestrate-setup.sh` once before the first use.
 
 Two rules that keep this skill honest:
 
@@ -23,10 +23,11 @@ Two rules that keep this skill honest:
    | worker | value named in the request, else the `worker` key |
    | effort | value named in the request, else the `effort` key |
 
-   - **If the file is missing, or either key is missing or empty:** stop before planning. Tell the user the orchestrate models are unconfigured and give them the command to fix it, from the skill repo:
+   - **If the file is missing, or either key is missing or empty:** stop before planning. Tell the user the orchestrate models are unconfigured and give them the command to fix it. Use whichever of these exists, in order:
 
      ```bash
-     scripts/setup.sh
+     ~/.pi/agent/bin/orchestrate-setup.sh          # installed by scripts/install.sh
+     scripts/setup.sh                              # from a clone of the skill repo
      ```
 
      Do not infer a worker from `pstack-models.md`, the session model, or anything else, and do not pick one yourself. One exception: if the request names both models explicitly, proceed and write them into `orchestrate.json` so the choice persists.
@@ -113,7 +114,7 @@ After all steps: run the full verification once more on the combined diff, then 
 
 ## Models
 
-Both models come from `<agent-dir>/orchestrate.json`, written by `scripts/setup.sh`. There is no built-in default: the skill refuses to run on a guess.
+Both models come from `<agent-dir>/orchestrate.json`, written by the setup script (`<agent-dir>/bin/orchestrate-setup.sh` once installed, or `scripts/setup.sh` from the repo). There is no built-in default: the skill refuses to run on a guess.
 
 ```json
 {
