@@ -46,12 +46,33 @@ grep -q 'orchestrate/SKILL.md' "$root/prompts/orchestrate.md" || err "prompt tem
 [ "$fail" -eq 0 ] && ok "prompt template"
 
 # 6. Install into a throwaway HOME and prove the files land where Pi looks.
-tmp=$(mktemp -d)
-trap 'rm -rf "$tmp"' EXIT
-HOME="$tmp" "$root/scripts/install.sh" >/dev/null
+inst=$(mktemp -d)
+HOME="$inst" "$root/scripts/install.sh" >/dev/null
 for f in skills/orchestrate/SKILL.md skills/orchestrate/references/plan.template.md skills/orchestrate/references/brief.template.md prompts/orchestrate.md; do
-  [ -f "$tmp/.pi/agent/$f" ] || err "install did not create $f"
+  [ -f "$inst/.pi/agent/$f" ] || err "install did not create $f"
 done
 [ "$fail" -eq 0 ] && ok "clean install lands in \$HOME/.pi/agent"
+
+# 7. Scripts parse, and setup.sh writes a config the skill can read.
+for s in scripts/install.sh scripts/setup.sh scripts/validate.sh; do
+  bash -n "$root/$s" || err "syntax error in $s"
+done
+if [ "$fail" -eq 0 ]; then ok "scripts parse"; fi
+
+tmpc=$(mktemp -d)
+trap 'rm -rf "$tmpc"' EXIT
+AGENT_DIR="$tmpc" "$root/scripts/setup.sh" --architect session --worker nvidia/nemotron-3.5-super-vl-120b-a12b --effort high >/dev/null
+python3 - "$tmpc/orchestrate.json" <<'PY' || err "setup.sh wrote an unreadable config"
+import json, sys
+c = json.load(open(sys.argv[1]))
+assert c["architect"] == "session", c
+assert c["worker"] == "nvidia/nemotron-3.5-super-vl-120b-a12b", c
+assert c["effort"] == "high", c
+PY
+[ "$fail" -eq 0 ] && ok "setup.sh writes a valid config"
+
+# 8. The skill documents the config file it depends on.
+grep -q 'orchestrate.json' "$skill/SKILL.md" || err "SKILL.md does not read orchestrate.json"
+[ "$fail" -eq 0 ] && ok "SKILL.md reads orchestrate.json"
 
 exit "$fail"

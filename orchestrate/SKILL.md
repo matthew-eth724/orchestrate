@@ -1,26 +1,34 @@
 ---
 name: orchestrate
-description: "Plan with the session model, execute through subagents on a cheap model, then review, spot flaws, and re-dispatch until the session model approves. Use for /orchestrate, 'orchestrate this', or any implementation you want planned by a strong model but written by a cheap one."
+description: "Plan with a strong model, execute through subagents on a cheap model, then review, spot flaws, and re-dispatch until the strong model approves. Use for /orchestrate, 'orchestrate this', or any implementation you want planned by a strong model but written by a cheap one."
 ---
 
 # Orchestrate
 
-You are the **architect**. You never write implementation code yourself. You plan, dispatch, review, and approve. Subagents on a cheap model write the code.
+A stronger **architect** model plans and reviews; cheaper **worker** models write the code. By default the architect is the model this session already runs. `scripts/setup.sh` can point the architect at a different model and pick the worker.
 
 Two rules that keep this skill honest:
 
-- **No self-execution.** Any task that changes files goes to a subagent. Typing it yourself defeats the point of the skill.
+- **No self-execution.** The architect does not edit implementation files. Any task that changes files goes to a worker. Typing the implementation yourself defeats the point of the skill.
 - **No approval without evidence.** You approve only after reading the real diff and seeing a verification command actually run. "Looks right" is not approval.
 
 ## Setup
 
 1. **Read the request.** Restate the goal in one sentence and the done predicate ("done means X passes"). If the request is ambiguous in a way that changes the design, ask one question before planning.
-2. **Fix the models.**
-   - **Architect** = this session's model. Never override it.
-   - **Worker** = the `orchestrate workers` line in `~/.pi/agent/pstack-models.md` if present. Otherwise `nvidia/nemotron-3.5-super-vl-120b-a12b`. If the sheet says `inherit-parent` or `auto`, omit `model` and say so, because the skill's premise is lost.
-   - If a dispatch fails because the slug is invalid, read the error, pick the closest valid slug in the same family, and report the substitution.
-3. **Open a todolist.** Plan md / Dispatch / Review / Fix / Approve, one entry each. Extend as rounds accumulate.
-4. **Write `references/brief.template.md` content into a plan file** at `.orchestrate/plan.md` in the working repo (gitignored or outside the diff). See [the plan template](references/plan.template.md).
+2. **Resolve the models.** Read `<agent-dir>/orchestrate.json` once (`<agent-dir>` is `~/.pi/agent` unless `PI_CODING_AGENT_DIR` says otherwise). If the file is missing, say so once and use the defaults in [Models](#models); suggest `scripts/setup.sh` from the skill repo. Resolve in this order:
+
+   | Setting | Precedence |
+   |---|---|
+   | architect | value in the request ("orchestrate with fable as architect") → `architect` key → `session` |
+   | worker | value in the request → `orchestrate workers` in `pstack-models.md` → `worker` key → built-in default |
+   | effort | value in the request → `effort` key → none |
+
+   - **architect = `session`** (default): you plan and review inline, on this session's model. Use your own `read`, `bash`, and diff tools.
+   - **architect = a model slug**: planning and review run in subagents on that model, since this session's model is not the architect. Dispatch a planning subagent with `model` set to the architect slug; it returns the plan. Dispatch review the same way, giving it the plan path and the diff. **You relay and enforce the loop; you do not invent the plan.** If the architect subagent is unavailable, stop and report rather than falling back to planning yourself.
+   - **worker**: pass as `model` on every dispatch. If it is `inherit-parent` or `auto`, omit `model` and warn that the skill's premise is lost.
+   - If a dispatch fails because a slug is invalid, read the error, pick the closest valid slug in the same provider, and report the substitution.
+3. **Open a todolist.** Plan / Dispatch / Review / Fix / Approve, one entry each. Extend as rounds accumulate.
+4. **Write the plan** to `.orchestrate/plan.md` in the working repo (gitignored or outside the diff), following [the plan template](references/plan.template.md).
 
 ## Phase 1 — Plan (architect only)
 
@@ -98,10 +106,20 @@ After all steps: run the full verification once more on the combined diff, then 
 
 ## Models
 
-- architect: session model (never overridden)
-- workers: `nvidia/nemotron-3.5-super-vl-120b-a12b`, overridable by the `orchestrate workers` line in `~/.pi/agent/pstack-models.md`
+Defaults, overridden by `<agent-dir>/orchestrate.json` (written by `scripts/setup.sh`):
 
-Workers are cheap and fast, so they get narrow briefs and short loops. If a step needs judgment this skill cannot delegate, the architect does it as a planning act (reading code, writing the interface, writing the test) and leaves only the mechanical work to workers.
+```json
+{
+  "architect": "session",
+  "worker": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "effort": "optional, low | medium | high"
+}
+```
+
+- **architect**: `session` keeps planning and review on this session's model. A slug moves planning and review into subagents on that model, with this session acting only as the loop's enforcer.
+- **worker**: the model that writes code. Keep it cheap; that is the point.
+
+Workers are cheap and fast, so they get narrow briefs and short loops. If a step needs judgment the skill cannot delegate, the architect does it as a planning act (reading code, writing the interface, writing the test) and leaves only the mechanical work to workers.
 
 ## References
 

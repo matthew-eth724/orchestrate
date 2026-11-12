@@ -17,7 +17,13 @@ Pass an explicit agent dir if yours is not `~/.pi/agent`:
 orchestrate/scripts/install.sh /path/to/agent-dir
 ```
 
-Then `/reload` in a running Pi session.
+Then `/reload` in a running Pi session. The installer also drops `orchestrate-setup.sh` in `<agent-dir>/bin/` so you can re-run the model picker later.
+
+Pick your models (or jump to [Setup](#setup-choose-your-models)):
+
+```bash
+~/.pi/agent/bin/orchestrate-setup.sh
+```
 
 Two entry points after install:
 
@@ -26,25 +32,55 @@ Two entry points after install:
 | `/orchestrate <task>` | prompt template |
 | `/skill:orchestrate <task>` | skill command |
 
-## Configure the worker model
+## Setup: choose your models
 
-Default worker is `nvidia/nemotron-3.5-super-vl-120b-a12b`. Override it by adding one line to `~/.pi/agent/pstack-models.md`:
+Run the setup wizard after installing:
 
+```bash
+~/.pi/agent/bin/orchestrate-setup.sh
 ```
-orchestrate workers: <provider/model-id>
+
+It asks two questions:
+
+1. **Architect** — the model that plans, reviews, and approves.
+   `session` (default) uses the model your Pi session already runs, so planning and review stay inline with no extra tokens. Picking a specific model moves planning and review into subagents on that model.
+2. **Worker** — the model that writes the code.
+
+Then it asks for an optional worker reasoning effort (`low`, `medium`, `high`, or blank to inherit).
+
+Wizard output lands in `<agent-dir>/orchestrate.json`:
+
+```json
+{
+  "architect": "session",
+  "worker": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "effort": "high"
+}
 ```
 
-If the line is missing, the skill uses its default. `inherit-parent` is accepted but defeats the point: workers then run on the architect model.
+`<agent-dir>` is `~/.pi/agent` unless `PI_CODING_AGENT_DIR` is set. If the file is missing, the skill uses its built-in defaults and says so once.
+
+### Non-interactive
+
+```bash
+orchestrate-setup.sh --list                              # show models
+orchestrate-setup.sh --show                              # current config
+orchestrate-setup.sh --architect session \
+                     --worker nvidia/z-ai/glm-5.3-flash  # set both
+orchestrate-setup.sh --reset                             # back to defaults
+```
+
+Model choices resolve in this order: the request itself ("orchestrate with fable as architect") → `orchestrate.json` → an `orchestrate workers` line in `pstack-models.md` for the worker → built-in defaults.
 
 ## The loop
 
 | Phase | Actor | Output |
 |---|---|---|
-| Plan | session model | ordered steps, exact touch list, shared interfaces written out, one verification command per step, and the specific mistakes a cheap model is expected to make in each step |
+| Plan | architect | ordered steps, exact touch list, shared interfaces written out, one verification command per step, and the specific mistakes a cheap model is expected to make in each step |
 | Dispatch | workers | code, plus `PASS` / `ISSUES` / `BLOCKED` with pasted verification output |
-| Review | session model | reads the diff, classifies findings |
+| Review | architect | reads the diff, classifies findings |
 | Fix | workers | findings-only re-dispatch, same worker where its context still applies |
-| Approve | session model | per-step approval, then one final verification on the combined diff |
+| Approve | architect | per-step approval, then one final verification on the combined diff |
 
 Findings are classified so fixes stay targeted:
 
@@ -72,12 +108,13 @@ Fixes are capped at three rounds per step. After that the architect must narrow 
 ## Layout
 
 ```
-orchestrate/SKILL.md                    the loop
-orchestrate/references/plan.template.md plan scaffold, written to .orchestrate/plan.md
+orchestrate/SKILL.md                     the loop
+orchestrate/references/plan.template.md  plan scaffold, written to .orchestrate/plan.md
 orchestrate/references/brief.template.md worker brief + required report format
-prompts/orchestrate.md                  bare /orchestrate command
-scripts/install.sh                      copies skill + prompt into an agent dir
-scripts/validate.sh                     checks frontmatter, links, and a clean install
+prompts/orchestrate.md                   bare /orchestrate command
+scripts/setup.sh                         model picker, writes orchestrate.json
+scripts/install.sh                       copies skill, prompt, and setup script into an agent dir
+scripts/validate.sh                      frontmatter, links, clean install, setup round-trip
 ```
 
 `orchestrate/` is a self-contained Agent Skills directory, so it can also be dropped into any runtime that reads `skills/` without the install script.
@@ -86,6 +123,6 @@ Plan files land in `.orchestrate/` inside the target repo. Add that directory to
 
 ## Limitations
 
-- Designed for Pi. The session model is the architect by construction: the skill never passes a `model` to its own work, only to worker dispatches.
+- Designed for Pi. With `architect: session` there is no architect dispatch at all; with an architect slug, the session relays planning and review through subagents.
 - Cheap models still need narrow steps. If a step needs judgment the architect cannot delegate, it does that part itself and leaves the mechanical rest to workers.
 - Parallel dispatch is only safe for steps that touch disjoint files and share no interface in flight. The skill says so; it does not enforce it.
