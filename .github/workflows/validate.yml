@@ -14,11 +14,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      # The PyPI package is skills-ref; it installs the `agentskills` binary.
       - name: Install the Agent Skills reference validator
         run: pip install skills-ref
 
-      - name: Validate
-        run: PATH="$HOME/.local/bin:$PATH" bash scripts/validate.sh
-
       - name: Validate with the reference implementation
-        run: skills-ref validate .
+        run: agentskills validate "$PWD"
+
+      - name: Validate (repo checks)
+        run: bash scripts/validate.sh
