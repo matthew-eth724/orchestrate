@@ -1,0 +1,19 @@
+{
+  "providers": {
+    "testvendor": {
+      "baseUrl": "https://example.invalid/v1",
+      "api": "openai-completions",
+      "models": [
+        { "id": "cheap-model" },
+        { "id": "testvendor/vendored-model" }
+      ]
+    },
+    "strong": {
+      "baseUrl": "https://example.invalid/v1",
+      "api": "openai-completions",
+      "models": [
+        { "id": "strong-model" }
+      ]
+    }
+  }
+}

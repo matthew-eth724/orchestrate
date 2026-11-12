@@ -53,26 +53,58 @@ for f in skills/orchestrate/SKILL.md skills/orchestrate/references/plan.template
 done
 [ "$fail" -eq 0 ] && ok "clean install lands in \$HOME/.pi/agent"
 
-# 7. Scripts parse, and setup.sh writes a config the skill can read.
+# 7. Scripts parse.
 for s in scripts/install.sh scripts/setup.sh scripts/validate.sh; do
   bash -n "$root/$s" || err "syntax error in $s"
 done
-if [ "$fail" -eq 0 ]; then ok "scripts parse"; fi
+[ "$fail" -eq 0 ] && ok "scripts parse"
 
+# 8. setup.sh writes a config the skill can read, against a fixture catalog.
 tmpc=$(mktemp -d)
 trap 'rm -rf "$tmpc"' EXIT
-AGENT_DIR="$tmpc" "$root/scripts/setup.sh" --architect session --worker nvidia/nemotron-3.5-super-vl-120b-a12b --effort high >/dev/null
-python3 - "$tmpc/orchestrate.json" <<'PY' || err "setup.sh wrote an unreadable config"
+mkdir -p "$tmpc/.pi/agent"
+cp "$root/scripts/fixtures/models.json" "$tmpc/.pi/agent/models.json"
+AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" \
+  --architect strong/strong-model --worker testvendor/cheap-model --effort high >/dev/null
+python3 - "$tmpc/.pi/agent/orchestrate.json" <<'PY' || err "setup.sh wrote an unreadable config"
 import json, sys
 c = json.load(open(sys.argv[1]))
-assert c["architect"] == "session", c
-assert c["worker"] == "nvidia/nemotron-3.5-super-vl-120b-a12b", c
+assert c["architect"] == "strong/strong-model", c
+assert c["worker"] == "testvendor/cheap-model", c
 assert c["effort"] == "high", c
 PY
 [ "$fail" -eq 0 ] && ok "setup.sh writes a valid config"
 
-# 8. The skill documents the config file it depends on.
+# 9. setup.sh refuses to invent models.
+expect_fail() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then err "$label should have failed"; else ok "refuses: $label"; fi
+}
+expect_fail "no --architect" env AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --worker testvendor/cheap-model
+expect_fail "unknown slug" env AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --architect strong/strong-model --worker nope/nothing
+nocat="$tmpc/nocat/.pi/agent"
+mkdir -p "$nocat"
+expect_fail "missing models.json" env AGENT_DIR="$nocat" "$root/scripts/setup.sh" --list
+expect_fail "empty input" sh -c "printf '\n\n\n' | AGENT_DIR=$tmpc/.pi/agent $root/scripts/setup.sh"
+
+# 10. The vendored-id prefix is collapsed so slugs are usable.
+AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --list | grep -Fxq "testvendor/vendored-model" \
+  || err "model list does not collapse a vendored id prefix"
+AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --list | grep -Fxq "testvendor/testvendor/vendored-model" \
+  && err "model list still shows a doubled prefix"
+[ "$fail" -eq 0 ] && ok "model list collapses vendored prefixes"
+
+# 11. No general default anywhere in the shipped skill or scripts.
+if grep -rEq '(worker|architect)[^=]*=\s*"?[a-zA-Z0-9_-]+/[a-zA-Z0-9._/-]+' "$root/scripts/setup.sh" \
+   || grep -rEq 'default[_a-z]*worker|default[_a-z]*architect' "$root/scripts/setup.sh"; then
+  err "a hard-coded default model remains in the setup script"
+else
+  ok "no hard-coded default model"
+fi
+
+# 12. The skill documents the config file it depends on and the no-default rule.
 grep -q 'orchestrate.json' "$skill/SKILL.md" || err "SKILL.md does not read orchestrate.json"
-[ "$fail" -eq 0 ] && ok "SKILL.md reads orchestrate.json"
+grep -qi 'no built-in default' "$skill/SKILL.md" || err "SKILL.md does not state the no-default rule"
+[ "$fail" -eq 0 ] && ok "SKILL.md documents config requirements"
 
 exit "$fail"

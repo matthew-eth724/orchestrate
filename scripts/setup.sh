@@ -15,22 +15,10 @@ agent_dir="${AGENT_DIR:-${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}}"
 config="$agent_dir/orchestrate.json"
 models_json="$agent_dir/models.json"
 
-default_worker="nvidia/nemotron-3.5-super-vl-120b-a12b"
-
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-builtin_models() {
-  cat <<'EOF'
-nvidia/nemotron-3.5-super-vl-120b-a12b
-nvidia/nemotron-3.5-lightning-30b-a3b
-nvidia/nemotron-3-ultra-550b-a55b
-nvidia/nemotron-3.5-bolt-e4b
-nvidia/z-ai/glm-5.3-flash
-nvidia/minimaxai/minimax-m3.1-flash
-EOF
-}
-
-# Print provider/model pairs from the Pi models.json, else a built-in list.
+# Print provider/model pairs from the Pi models.json. There is no built-in
+# fallback list: an unreadable catalog is an error, not a guess.
 list_models() {
   local from_file=""
   if [ -r "$models_json" ] && command -v python3 >/dev/null 2>&1; then
@@ -47,11 +35,18 @@ for prov, v in d.get("providers", {}).items():
         print(prov + "/" + mid)
 ' "$models_json" 2>/dev/null || true)"
   fi
-  if [ -n "$from_file" ]; then
-    printf '%s\n' "$from_file"
-  else
-    builtin_models
+  [ -n "$from_file" ] || die "cannot read models from $models_json — is Pi configured?"
+  printf '%s\n' "$from_file"
+}
+
+# Fail when a slug is neither 'session' nor present in the model catalog.
+check_registered() {
+  local slug="$1"
+  [ "$slug" = "session" ] && return 0
+  if list_models | grep -Fxq "$slug"; then
+    return 0
   fi
+  die "unknown model '$slug' — run --list to see available models"
 }
 
 show() {
@@ -95,16 +90,12 @@ pick_model() {
   [ "${#items[@]}" -gt 0 ] || die "no models found in $models_json"
   printf '\n' >&2
   for m in "${items[@]}"; do
-    if [ "$m" = "$default_worker" ]; then
-      printf '  %2d) %s  (default)\n' "$i" "$m" >&2
-    else
-      printf '  %2d) %s\n' "$i" "$m" >&2
-    fi
+    printf '  %2d) %s\n' "$i" "$m" >&2
     i=$((i + 1))
   done
-  printf '%s [1]: ' "$prompt" >&2
+  printf '%s: ' "$prompt" >&2
   read -r sel
-  sel="${sel:-1}"
+  [ -n "$sel" ] || die "no choice made"
   case "$sel" in
     *[!0-9]*)
       # Not a number: treat the input as a literal model slug.
@@ -122,14 +113,15 @@ pick_model() {
 prompt_architect() {
   local choice
   printf 'Architect model (plans, reviews, approves).\n' >&2
-  printf '  1) session — the model this session already runs (recommended)\n' >&2
+  printf '  1) session — the model this session already runs\n' >&2
   printf '  2) a specific model — planning runs in a subagent on that model\n' >&2
-  printf 'Choice [1]: ' >&2
+  printf 'Choice: ' >&2
   read -r choice
-  case "${choice:-1}" in
-    1|session|"") printf 'session' ;;
-    2|pick)       printf '%s' "$(pick_model 'Architect model')" ;;
-    *)            printf '%s' "$choice" ;;
+  [ -n "$choice" ] || die "no choice made"
+  case "$choice" in
+    1|session) printf 'session' ;;
+    2|pick)     printf '%s' "$(pick_model 'Architect model')" ;;
+    *)          printf '%s' "$choice" ;;
   esac
 }
 
@@ -151,6 +143,8 @@ interactive() {
 
   [ -n "$worker" ] || die "worker model is required"
   printf '\n'
+  check_registered "$architect"
+  check_registered "$worker"
   write_config "$architect" "$worker" "$effort"
   printf '\nNext: /reload in a running Pi session, then /orchestrate <task>\n'
 }
@@ -177,7 +171,10 @@ case "${1:---interactive}" in
       esac
     done
     [ -n "$worker" ] || die "--worker is required"
-    write_config "${architect:-session}" "$worker" "$effort"
+    [ -n "$architect" ] || die "--architect is required (use 'session' to plan on this session's model)"
+    check_registered "$architect"
+    check_registered "$worker"
+    write_config "$architect" "$worker" "$effort"
     ;;
   -h|--help)
     sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'

@@ -5,7 +5,7 @@ description: "Plan with a strong model, execute through subagents on a cheap mod
 
 # Orchestrate
 
-A stronger **architect** model plans and reviews; cheaper **worker** models write the code. By default the architect is the model this session already runs. `scripts/setup.sh` can point the architect at a different model and pick the worker.
+A stronger **architect** model plans and reviews; cheaper **worker** models write the code. The architect is either the model this session already runs or a model chosen in setup. Neither model has a default: run `scripts/setup.sh` once before the first use.
 
 Two rules that keep this skill honest:
 
@@ -15,17 +15,24 @@ Two rules that keep this skill honest:
 ## Setup
 
 1. **Read the request.** Restate the goal in one sentence and the done predicate ("done means X passes"). If the request is ambiguous in a way that changes the design, ask one question before planning.
-2. **Resolve the models.** Read `<agent-dir>/orchestrate.json` once (`<agent-dir>` is `~/.pi/agent` unless `PI_CODING_AGENT_DIR` says otherwise). If the file is missing, say so once and use the defaults in [Models](#models); suggest `scripts/setup.sh` from the skill repo. Resolve in this order:
+2. **Resolve the models from configuration.** There is no general default for either model. Read `<agent-dir>/orchestrate.json` (`<agent-dir>` is `~/.pi/agent` unless `PI_CODING_AGENT_DIR` says otherwise). The skill does not run until both models are known.
 
-   | Setting | Precedence |
+   | Setting | Source |
    |---|---|
-   | architect | value in the request ("orchestrate with fable as architect") → `architect` key → `session` |
-   | worker | value in the request → `orchestrate workers` in `pstack-models.md` → `worker` key → built-in default |
-   | effort | value in the request → `effort` key → none |
+   | architect | value named in the request, else the `architect` key |
+   | worker | value named in the request, else the `worker` key |
+   | effort | value named in the request, else the `effort` key |
 
-   - **architect = `session`** (default): you plan and review inline, on this session's model. Use your own `read`, `bash`, and diff tools.
+   - **If the file is missing, or either key is missing or empty:** stop before planning. Tell the user the orchestrate models are unconfigured and give them the command to fix it, from the skill repo:
+
+     ```bash
+     scripts/setup.sh
+     ```
+
+     Do not infer a worker from `pstack-models.md`, the session model, or anything else, and do not pick one yourself. One exception: if the request names both models explicitly, proceed and write them into `orchestrate.json` so the choice persists.
+   - **architect = `session`**: you plan and review inline, on this session's model. Use your own `read`, `bash`, and diff tools.
    - **architect = a model slug**: planning and review run in subagents on that model, since this session's model is not the architect. Dispatch a planning subagent with `model` set to the architect slug; it returns the plan. Dispatch review the same way, giving it the plan path and the diff. **You relay and enforce the loop; you do not invent the plan.** If the architect subagent is unavailable, stop and report rather than falling back to planning yourself.
-   - **worker**: pass as `model` on every dispatch. If it is `inherit-parent` or `auto`, omit `model` and warn that the skill's premise is lost.
+   - **worker**: pass as `model` on every dispatch. If the configured worker is `inherit-parent` or `auto`, that is a misconfiguration — stop and report, because the skill's premise is lost.
    - If a dispatch fails because a slug is invalid, read the error, pick the closest valid slug in the same provider, and report the substitution.
 3. **Open a todolist.** Plan / Dispatch / Review / Fix / Approve, one entry each. Extend as rounds accumulate.
 4. **Write the plan** to `.orchestrate/plan.md` in the working repo (gitignored or outside the diff), following [the plan template](references/plan.template.md).
@@ -106,18 +113,18 @@ After all steps: run the full verification once more on the combined diff, then 
 
 ## Models
 
-Defaults, overridden by `<agent-dir>/orchestrate.json` (written by `scripts/setup.sh`):
+Both models come from `<agent-dir>/orchestrate.json`, written by `scripts/setup.sh`. There is no built-in default: the skill refuses to run on a guess.
 
 ```json
 {
   "architect": "session",
-  "worker": "nvidia/nemotron-3.5-super-vl-120b-a12b",
+  "worker": "<provider/model-id>",
   "effort": "optional, low | medium | high"
 }
 ```
 
-- **architect**: `session` keeps planning and review on this session's model. A slug moves planning and review into subagents on that model, with this session acting only as the loop's enforcer.
-- **worker**: the model that writes code. Keep it cheap; that is the point.
+- **architect**: required. `session` keeps planning and review on this session's model. A slug moves planning and review into subagents on that model, with this session acting only as the loop's enforcer.
+- **worker**: required. The model that writes code. Keep it cheap; that is the point.
 
 Workers are cheap and fast, so they get narrow briefs and short loops. If a step needs judgment the skill cannot delegate, the architect does it as a planning act (reading code, writing the interface, writing the test) and leaves only the mechanical work to workers.
 
