@@ -7,14 +7,14 @@ An orchestrator skill for [Pi](https://github.com/badlogic/pi-mono). The session
 ## Install
 
 ```bash
-git clone https://github.com/matthew-eth724/orchestrate-skill.git
-orchestrate-skill/scripts/install.sh
+git clone https://github.com/matthew-eth724/orchestrate.git
+orchestrate/scripts/install.sh
 ```
 
 Pass an explicit agent dir if yours is not `~/.pi/agent`:
 
 ```bash
-orchestrate-skill/scripts/install.sh /path/to/agent-dir
+orchestrate/scripts/install.sh /path/to/agent-dir
 ```
 
 Then `/reload` in a running Pi session.
