@@ -12,9 +12,9 @@ bin_dir="$agent_dir/bin"
 
 mkdir -p "$skill_dir/references" "$prompt_dir" "$bin_dir"
 
-cp "$root/orchestrate/SKILL.md" "$skill_dir/SKILL.md"
-cp "$root/orchestrate/references/plan.template.md" "$skill_dir/references/plan.template.md"
-cp "$root/orchestrate/references/brief.template.md" "$skill_dir/references/brief.template.md"
+cp "$root/SKILL.md" "$skill_dir/SKILL.md"
+cp "$root/references/plan.template.md" "$skill_dir/references/plan.template.md"
+cp "$root/references/brief.template.md" "$skill_dir/references/brief.template.md"
 cp "$root/prompts/orchestrate.md" "$prompt_dir/orchestrate.md"
 
 # setup.sh derives the agent dir from its own location, so install it at a path

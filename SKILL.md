@@ -1,6 +1,8 @@
 ---
 name: orchestrate
 description: "Plan with a strong model, execute through subagents on a cheap model, then review, spot flaws, and re-dispatch until the strong model approves. Use for /orchestrate, 'orchestrate this', or any implementation you want planned by a strong model but written by a cheap one."
+license: MIT
+compatibility: "Requires Pi with model subagents enabled, plus a models.json listing at least two models. Setup is mandatory: run scripts/setup.sh before first use."
 ---
 
 # Orchestrate

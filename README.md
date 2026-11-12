@@ -119,17 +119,31 @@ Fixes are capped at three rounds per step. After that the architect must narrow 
 ## Layout
 
 ```
-orchestrate/SKILL.md                     the loop
-orchestrate/references/plan.template.md  plan scaffold, written to .orchestrate/plan.md
-orchestrate/references/brief.template.md worker brief + required report format
-prompts/orchestrate.md                   bare /orchestrate command
-scripts/setup.sh                         model picker, writes orchestrate.json
-scripts/install.sh                       copies skill, prompt, and setup script into an agent dir
-scripts/validate.sh                      frontmatter, links, install, setup, no-default guard
-scripts/fixtures/models.json             catalog used by the validator
+SKILL.md                       the loop
+references/plan.template.md    plan scaffold, written to .orchestrate/plan.md
+references/brief.template.md   worker brief + required report format
+prompts/orchestrate.md         bare /orchestrate command
+scripts/setup.sh               model picker, writes orchestrate.json
+scripts/install.sh             copies skill, prompt, and setup script into an agent dir
+scripts/validate.sh            frontmatter, links, install, setup, no-default guard
+scripts/fixtures/models.json   catalog used by the validator
 ```
 
-`orchestrate/` is a self-contained Agent Skills directory, so it can also be dropped into any runtime that reads `skills/` without the install script.
+## Agent Skills spec
+
+The repo root **is** the skill: it has `SKILL.md` at the top, so the repository can be used directly by any Agent Skills runtime without the install script. Keep those two rules in mind when editing:
+
+- **`SKILL.md` stays at the root.** Moving it into a subfolder breaks loading, because a skill is a directory whose `SKILL.md` is at its own top.
+- **The checkout directory must be named `orchestrate`**, matching the `name` field. `git clone ... orchestrate` is fine; renaming the folder is not.
+
+Verify with the official reference implementation:
+
+```bash
+pip install skills-ref
+skills-ref validate .
+```
+
+`scripts/validate.sh` runs it automatically when it is on `PATH` and skips otherwise.
 
 Plan files land in `.orchestrate/` inside the target repo. Add that directory to `.gitignore`.
 

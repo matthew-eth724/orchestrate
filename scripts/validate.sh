@@ -3,7 +3,8 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
-skill="$root/orchestrate"
+# The repo root is the skill: SKILL.md lives beside scripts/ and references/.
+skill="$root"
 fail=0
 
 err() { printf 'FAIL: %s\n' "$*" >&2; fail=1; }
@@ -20,6 +21,12 @@ desc=$(sed -n 's/^description://p' "$skill/SKILL.md" | head -1 | clean)
 [ "$name" = "orchestrate" ] || err "name must be 'orchestrate', got '$name'"
 [ -n "$desc" ] || err "description missing"
 [ "${#desc}" -le 1024 ] || err "description exceeds 1024 chars"
+# Optional fields have their own constraints.
+lic=$(sed -n 's/^license://p' "$skill/SKILL.md" | head -1 | clean)
+comp=$(sed -n 's/^compatibility://p' "$skill/SKILL.md" | head -1 | clean)
+[ -z "$comp" ] || { [ "${#comp}" -le 500 ] || err "compatibility exceeds 500 chars"; }
+[ -z "$lic" ] || ok "license declared: $lic"
+
 case "$name" in
   *[!a-z0-9-]*) err "name has invalid characters" ;;
   -*) err "name starts with a hyphen" ;;
@@ -45,7 +52,7 @@ done
 
 # 5. Prompt template has a description and points at the skill.
 grep -q '^description:' "$root/prompts/orchestrate.md" || err "prompt template lacks description"
-grep -q 'orchestrate/SKILL.md' "$root/prompts/orchestrate.md" || err "prompt template does not load SKILL.md"
+grep -q 'SKILL.md' "$root/prompts/orchestrate.md" || err "prompt template does not load SKILL.md"
 [ "$fail" -eq 0 ] && ok "prompt template"
 
 # 6. Install into a throwaway HOME and prove the files land where Pi looks.
@@ -97,10 +104,19 @@ AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --list | grep -Fxq "testven
   && err "model list still shows a doubled prefix"
 [ "$fail" -eq 0 ] && ok "model list collapses vendored prefixes"
 
-# 10b. Conform to the Agent Skills specification, using the spec skill's own
-#      validator when it is installed. Never hard-require it.
+# 10b. Conform to the Agent Skills specification. Prefer the official
+#      skills-ref validator (pip install skills-ref); fall back to the local
+#      agent-skills skill validator; skip when neither is available.
+ref_validator="$(command -v agentskills || true)"
 agent_skills_validator="$HOME/.pi/agent/skills/agent-skills/scripts/validate-skill.sh"
-if [ -x "$agent_skills_validator" ]; then
+if [ -n "$ref_validator" ]; then
+  if out=$("$ref_validator" validate "$skill" 2>&1); then
+    ok "skills-ref: $(printf '%s\n' "$out" | tail -1)"
+  else
+    err "skills-ref validation failed:
+$out"
+  fi
+elif [ -x "$agent_skills_validator" ]; then
   if out=$("$agent_skills_validator" "$skill" 2>&1); then
     ok "agentskills.io validator: $(printf '%s\n' "$out" | tail -1)"
   else
@@ -108,8 +124,11 @@ if [ -x "$agent_skills_validator" ]; then
 $out"
   fi
 else
-  printf 'skip: agentskills.io validator not installed\n'
+  printf 'skip: no agentskills validator installed\n'
 fi
+
+# 10b2. SKILL.md must sit at the skill root, not one level down.
+[ -f "$root/SKILL.md" ] || err "SKILL.md must be at the repo root so the repo is itself a skill"
 
 # 10c. Every path SKILL.md tells a reader to run must exist in at least one of
 #      the places the skill can be read: a clone, or an install.

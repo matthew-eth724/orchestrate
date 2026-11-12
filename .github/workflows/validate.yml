@@ -9,5 +9,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate skill
-        run: bash scripts/validate.sh
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the Agent Skills reference validator
+        run: pip install skills-ref
+
+      - name: Validate
+        run: PATH="$HOME/.local/bin:$PATH" bash scripts/validate.sh
+
+      - name: Validate with the reference implementation
+        run: skills-ref validate .
