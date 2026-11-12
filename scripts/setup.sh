@@ -34,12 +34,17 @@ EOF
 list_models() {
   local from_file=""
   if [ -r "$models_json" ] && command -v python3 >/dev/null 2>&1; then
-    from_file="$(python3 -c '
+      from_file="$(python3 -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 for prov, v in d.get("providers", {}).items():
     for m in v.get("models", []):
-        print(prov + "/" + m["id"])
+        mid = m["id"]
+        # Some catalogs store the vendor inside the id (nvidia/nemotron-...),
+        # which would compose to provider/vendor/model. Collapse the repeat.
+        if mid.startswith(prov + "/"):
+            mid = mid[len(prov) + 1:]
+        print(prov + "/" + mid)
 ' "$models_json" 2>/dev/null || true)"
   fi
   if [ -n "$from_file" ]; then
