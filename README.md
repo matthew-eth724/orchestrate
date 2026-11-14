@@ -45,6 +45,7 @@ It asks two questions:
 1. **Architect** — the model that plans, reviews, and approves.
    `session` uses the model your Pi session already runs, so planning and review stay inline with no extra tokens. Picking a specific model moves planning and review into subagents on that model.
 2. **Worker** — the model that writes the code.
+3. **Backups** (optional, repeatable) — models tried in order if the primary fails to dispatch.
 
 Then it asks for an optional worker reasoning effort (`low`, `medium`, `high`, or blank to inherit).
 
@@ -54,6 +55,7 @@ Wizard output lands in `<agent-dir>/orchestrate.json`:
 {
   "architect": "session",
   "worker": "<provider/model-id>",
+  "workers": ["<primary>", "<backup 1>", "<backup 2>"],
   "effort": "optional"
 }
 ```
@@ -65,9 +67,29 @@ Wizard output lands in `<agent-dir>/orchestrate.json`:
 There is no built-in default for either role. Setup is required, and the values are yours to choose:
 
 - The picker lists whatever your Pi `models.json` provides. If that catalog cannot be read, setup stops instead of falling back to a built-in list.
-- Both settings are mandatory. `--architect` omitted is an error, and blank input is an error.
+- Both settings are mandatory. `--architect` omitted is an error, blank input is an error, and an unknown `--backup` is rejected.
 - A slug that is not in the catalog is rejected.
 - If `orchestrate.json` is missing or incomplete, the skill **stops before planning** and tells you to run setup. It does not borrow a worker from `pstack-models.md`, the session model, or anywhere else.
+
+### Backups and failover
+
+`workers` is an ordered chain. The first entry writes code; the rest are tried in order when a dispatch fails to produce a result — provider outage, rate limit, revoked key, retired model.
+
+```bash
+orchestrate-setup.sh --architect session \
+  --worker Coarena/deepseek-v4-1-flash-1017 \
+  --backup Coarena/gpt-6-luna \
+  --backup nvidia/nemotron-3.5-super-vl-120b-a12b
+```
+
+Failover is deliberately narrow:
+
+- **It advances on transport failure only** — dispatch error, unknown model, timeout.
+- **It never advances on a bad result.** A blocker or failed verification is a fix round against the same worker. Switching models to escape hard feedback hides defects.
+- After a switch, the run stays on the model that worked. It does not bounce back.
+- If the chain is exhausted, the run stops and reports. The architect never writes the code itself.
+
+Every switch is recorded in the plan file and the final report.
 
 ### Non-interactive
 
@@ -123,7 +145,7 @@ SKILL.md                       the loop
 references/plan.template.md    plan scaffold, written to .orchestrate/plan.md
 references/brief.template.md   worker brief + required report format
 prompts/orchestrate.md         bare /orchestrate command
-scripts/setup.sh               model picker, writes orchestrate.json
+scripts/setup.sh               model picker and worker chain, writes orchestrate.json
 scripts/install.sh             copies skill, prompt, and setup script into an agent dir
 scripts/validate.sh            frontmatter, links, install, setup, no-default guard
 scripts/fixtures/models.json   catalog used by the validator

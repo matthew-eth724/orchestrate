@@ -69,6 +69,11 @@ for s in scripts/install.sh scripts/setup.sh scripts/validate.sh; do
 done
 [ "$fail" -eq 0 ] && ok "scripts parse"
 
+expect_fail() {
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then err "$label should have failed"; else ok "refuses: $label"; fi
+}
+
 # 8. setup.sh writes a config the skill can read, against a fixture catalog.
 tmpc=$(mktemp -d)
 trap 'rm -rf "$tmpc"' EXIT
@@ -85,11 +90,31 @@ assert c["effort"] == "high", c
 PY
 [ "$fail" -eq 0 ] && ok "setup.sh writes a valid config"
 
+# 8b. The worker chain: --backup is ordered, validated, and persisted.
+AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" \
+  --architect strong/strong-model --worker testvendor/cheap-model \
+  --backup testvendor/vendored-model --backup strong/strong-model >/dev/null
+python3 - "$tmpc/.pi/agent/orchestrate.json" <<'PY' || err "backup chain not written in order"
+import json, sys
+c = json.load(open(sys.argv[1]))
+want = ["testvendor/cheap-model", "testvendor/vendored-model", "strong/strong-model"]
+assert c["workers"] == want, c
+assert c["worker"] == want[0], c
+PY
+[ "$fail" -eq 0 ] && ok "worker chain persisted in order"
+
+# 8c. --show surfaces every backup.
+shown=$(AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --show)
+for m in testvendor/cheap-model testvendor/vendored-model strong/strong-model; do
+  printf '%s' "$shown" | grep -q "$m" || err "--show omits $m"
+done
+[ "$fail" -eq 0 ] && ok "--show lists the whole chain"
+
+# 8d. A bad backup is rejected, not silently kept.
+expect_fail "unknown backup" env AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" \
+  --architect strong/strong-model --worker testvendor/cheap-model --backup nope/nothing
+
 # 9. setup.sh refuses to invent models.
-expect_fail() {
-  local label="$1"; shift
-  if "$@" >/dev/null 2>&1; then err "$label should have failed"; else ok "refuses: $label"; fi
-}
 expect_fail "no --architect" env AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --worker testvendor/cheap-model
 expect_fail "unknown slug" env AGENT_DIR="$tmpc/.pi/agent" "$root/scripts/setup.sh" --architect strong/strong-model --worker nope/nothing
 nocat="$tmpc/nocat/.pi/agent"
@@ -147,6 +172,8 @@ fi
 # 12. The skill documents the config file it depends on and the no-default rule.
 grep -q 'orchestrate.json' "$skill/SKILL.md" || err "SKILL.md does not read orchestrate.json"
 grep -qi 'no built-in default' "$skill/SKILL.md" || err "SKILL.md does not state the no-default rule"
+grep -qi '^## Failover' "$skill/SKILL.md" || err "SKILL.md has no Failover section"
+grep -q 'workers' "$skill/SKILL.md" || err "SKILL.md does not read the workers chain"
 [ "$fail" -eq 0 ] && ok "SKILL.md documents config requirements"
 
 exit "$fail"

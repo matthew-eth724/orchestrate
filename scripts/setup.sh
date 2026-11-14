@@ -3,7 +3,7 @@
 #
 #   orchestrate-setup.sh                      interactive picker
 #   orchestrate-setup.sh --list               list available models
-#   orchestrate-setup.sh --architect M --worker M [--effort L]
+#   orchestrate-setup.sh --architect M --worker M [--backup M]... [--effort L]
 #   orchestrate-setup.sh --show
 #   orchestrate-setup.sh --reset
 #
@@ -58,25 +58,36 @@ show() {
   python3 -c '
 import json, sys
 c = json.load(open(sys.argv[1]))
-for k in ("architect", "worker", "effort"):
-    if k in c:
-        print("%-15s %s" % (k + ":", c[k]))
+if "architect" in c:
+    print("%-15s %s" % ("architect:", c["architect"]))
+# Accept both shapes: a single worker, or an ordered worker chain.
+chain = c.get("workers") or ([c["worker"]] if c.get("worker") else [])
+for i, w in enumerate(chain):
+    label = "worker:" if i == 0 else "  backup %d:" % i
+    print("%-15s %s" % (label, w))
+if "effort" in c:
+    print("%-15s %s" % ("effort:", c["effort"]))
 ' "$config"
 }
 
+# write_config <architect> <effort> <worker> [backup...]
 write_config() {
-  local architect="$1" worker="$2" effort="${3:-}"
+  local architect="$1" effort="$2"; shift 2
+  [ $# -ge 1 ] || die "at least one worker model is required"
   mkdir -p "$agent_dir"
   python3 -c '
 import json, sys
-path, architect, worker, effort = sys.argv[1:5]
-cfg = {"architect": architect, "worker": worker}
+path, architect, effort = sys.argv[1:4]
+workers = sys.argv[4:]
+cfg = {"architect": architect, "worker": workers[0]}
+if len(workers) > 1:
+    cfg["workers"] = workers
 if effort:
     cfg["effort"] = effort
 with open(path, "w") as f:
     json.dump(cfg, f, indent=2)
     f.write("\n")
-' "$config" "$architect" "$worker" "$effort"
+' "$config" "$architect" "$effort" "$@"
   printf 'wrote %s\n\n' "$config"
   show
 }
@@ -142,16 +153,32 @@ interactive() {
   esac
 
   [ -n "$worker" ] || die "worker model is required"
+
+  # Optional ordered fallbacks: tried in turn when a dispatch fails.
+  local chain=("$worker") more
+  printf '\n'
+  while :; do
+    printf 'Add a backup worker, tried if the previous one fails? (y/N): '
+    read -r more
+    case "$more" in
+      y|Y|yes) ;;
+      *) break ;;
+    esac
+    chain+=("$(pick_model 'Backup worker model')")
+    printf '\n'
+  done
+
   printf '\n'
   check_registered "$architect"
-  check_registered "$worker"
-  write_config "$architect" "$worker" "$effort"
+  for m in "${chain[@]}"; do check_registered "$m"; done
+  write_config "$architect" "$effort" "${chain[@]}"
   printf '\nNext: /reload in a running Pi session, then /orchestrate <task>\n'
 }
 
 architect=""
 worker=""
 effort=""
+backups=()
 
 case "${1:---interactive}" in
   --list) list_models ;;
@@ -161,23 +188,28 @@ case "${1:---interactive}" in
     printf 'removed %s\n' "$config"
     ;;
   --interactive) interactive ;;
-  --architect|--worker|--effort)
+  --architect|--worker|--effort|--backup)
     while [ $# -gt 0 ]; do
       case "$1" in
         --architect) architect="${2:-}"; shift 2 ;;
         --worker)    worker="${2:-}"; shift 2 ;;
         --effort)    effort="${2:-}"; shift 2 ;;
+        --backup)    backups+=("${2:-}"); shift 2 ;;
         *) die "unknown argument: $1" ;;
       esac
     done
     [ -n "$worker" ] || die "--worker is required"
     [ -n "$architect" ] || die "--architect is required (use 'session' to plan on this session's model)"
+    for b in "${backups[@]+"${backups[@]}"}"; do
+      [ -n "$b" ] || die "--backup needs a model"
+    done
     check_registered "$architect"
     check_registered "$worker"
-    write_config "$architect" "$worker" "$effort"
+    for b in "${backups[@]+"${backups[@]}"}"; do check_registered "$b"; done
+    write_config "$architect" "$effort" "$worker" "${backups[@]+"${backups[@]}"}"
     ;;
   -h|--help)
-    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
     ;;
   *) die "unknown argument: $1 (see --help)" ;;
 esac

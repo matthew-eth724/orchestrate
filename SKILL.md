@@ -22,7 +22,7 @@ Two rules that keep this skill honest:
    | Setting | Source |
    |---|---|
    | architect | value named in the request, else the `architect` key |
-   | worker | value named in the request, else the `worker` key |
+   | worker chain | value named in the request, else `workers` (ordered), else the single `worker` key |
    | effort | value named in the request, else the `effort` key |
 
    - **If the file is missing, or either key is missing or empty:** stop before planning. Tell the user the orchestrate models are unconfigured and give them the command to fix it. Use whichever of these exists, in order:
@@ -35,8 +35,8 @@ Two rules that keep this skill honest:
      Do not infer a worker from `pstack-models.md`, the session model, or anything else, and do not pick one yourself. One exception: if the request names both models explicitly, proceed and write them into `orchestrate.json` so the choice persists.
    - **architect = `session`**: you plan and review inline, on this session's model. Use your own `read`, `bash`, and diff tools.
    - **architect = a model slug**: planning and review run in subagents on that model, since this session's model is not the architect. Dispatch a planning subagent with `model` set to the architect slug; it returns the plan. Dispatch review the same way, giving it the plan path and the diff. **You relay and enforce the loop; you do not invent the plan.** If the architect subagent is unavailable, stop and report rather than falling back to planning yourself.
-   - **worker**: pass as `model` on every dispatch. If the configured worker is `inherit-parent` or `auto`, that is a misconfiguration — stop and report, because the skill's premise is lost.
-   - If a dispatch fails because a slug is invalid, read the error, pick the closest valid slug in the same provider, and report the substitution.
+   - **worker chain**: the worker is the first entry of `workers`, or the `worker` key when `workers` is absent. Each later entry is a backup, tried in order when the one before it fails to dispatch. Pass the active worker as `model` on every dispatch. See [Failover](#failover).
+   - If any configured model is `inherit-parent` or `auto`, that is a misconfiguration — stop and report, because the skill's premise is lost.
 3. **Open a todolist.** Plan / Dispatch / Review / Fix / Approve, one entry each. Extend as rounds accumulate.
 4. **Write the plan** to `.orchestrate/plan.md` in the working repo (gitignored or outside the diff), following [the plan template](references/plan.template.md).
 
@@ -58,10 +58,28 @@ The **Risks** section is what makes cheap execution work. Name the specific mist
 
 Do not dispatch until the plan has a verification command per step. If you cannot name one, plan the test first as its own step.
 
+## Failover
+
+A dispatch can fail for reasons the code cannot fix: provider outage, rate limit, revoked key, retired model. Backups exist for that, and only that.
+
+**Advance down the chain when a dispatch fails to produce a result** — the tool returns an error, the model is unknown or withdrawn, or the call times out. On failure:
+
+1. Record the failure: which model, the error text, and at which step.
+2. Try the next entry in `workers`. Retry the same brief, unchanged.
+3. Announce the switch once, in the plan file and in the final report: `STEP 3 worker: A failed (408) -> moved to B`.
+4. Never silently retry against the same failed model more than once.
+5. If the whole chain is exhausted, stop. Report each model and its error. Do not fall back to writing the code yourself.
+
+**Do not advance on a poor result.** A `BLOCKER` finding, sloppy code, or a failed verification is not a transport failure — that is a fix round against the same worker (Phase 4). Switching models to escape hard feedback hides defects and wastes the plan. Advance only when the model could not be reached or could not answer.
+
+Once failover happens, stay on the model that worked for the rest of the run. Do not bounce back to an earlier entry mid-run. Note the final model in each later brief so the worker's context stays consistent.
+
+If a backup is itself absent from the catalog at failover time, skip it and say so.
+
 ## Phase 2 — Dispatch (workers)
 
 - One subagent per step or per independent group of steps. Parallel only when steps touch disjoint files and share no interface-in-flight.
-- Call the `agent` tool with `subagent_type: "general-purpose"`, `model` set to the worker slug, `run_in_background: true` for parallel sets.
+- Call the `agent` tool with `subagent_type: "general-purpose"`, `model` set to the active worker slug, `run_in_background: true` for parallel sets. On dispatch failure, follow [Failover](#failover) before anything else.
 - Every brief stands alone. Do not write "as discussed above".
 - The brief contains: goal, the plan file path, this step's scope, the interfaces it may use, files it may touch and files it may not, the verification command, and the required report format from `references/brief.template.md`.
 - Tell the worker explicitly: **do not refactor outside your scope, do not add dependencies, do not invent APIs you have not read in this repo.**
@@ -112,6 +130,7 @@ After all steps: run the full verification once more on the combined diff, then 
 - Verification transcript.
 - Findings you cleared, per round.
 - Anything you accepted knowing it was imperfect, and why.
+- Failovers: which worker failed, its error, and which model took over from which step.
 - Model substitutions, gaps, or dropped workers.
 
 ## Models
@@ -122,12 +141,19 @@ Both models come from `<agent-dir>/orchestrate.json`, written by the setup scrip
 {
   "architect": "session",
   "worker": "<provider/model-id>",
+  "workers": [
+    "<primary>",
+    "<backup 1>",
+    "<backup 2>"
+  ],
   "effort": "optional, low | medium | high"
 }
 ```
 
+`workers` is optional. When present it is the authoritative ordered chain, and `worker` duplicates its first entry for tools that read only that key. Without `workers`, `worker` is a chain of one.
+
 - **architect**: required. `session` keeps planning and review on this session's model. A slug moves planning and review into subagents on that model, with this session acting only as the loop's enforcer.
-- **worker**: required. The model that writes code. Keep it cheap; that is the point.
+- **workers**: required, at least one. The first entry writes code; later entries are failover only. Keep the primary cheap; that is the point.
 
 Workers are cheap and fast, so they get narrow briefs and short loops. If a step needs judgment the skill cannot delegate, the architect does it as a planning act (reading code, writing the interface, writing the test) and leaves only the mechanical work to workers.
 
